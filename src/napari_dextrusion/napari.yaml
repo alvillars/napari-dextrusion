@@ -1,0 +1,48 @@
+name: napari-dextrusion
+display_name: Dextrusion napari plugin
+contributions:
+  commands:
+    - id: napari-dextrusion.get_reader
+      python_name: napari_dextrusion._reader:napari_get_reader
+      title: Open data with Dextrusion napari plugin
+    - id: napari-dextrusion.write_multiple
+      python_name: napari_dextrusion._writer:write_multiple
+      title: Save multi-layer data with Dextrusion napari plugin
+    - id: napari-dextrusion.write_single_image
+      python_name: napari_dextrusion._writer:write_single_image
+      title: Save image data with Dextrusion napari plugin
+    - id: napari-dextrusion.make_sample_data
+      python_name: napari_dextrusion._sample_data:make_sample_data
+      title: Load sample data from Dextrusion napari plugin
+    - id: napari-dextrusion.make_qwidget
+      python_name: napari_dextrusion._widget:ExampleQWidget
+      title: Make example QWidget
+    - id: napari-dextrusion.make_magic_widget
+      python_name: napari_dextrusion._widget:example_magic_widget
+      title: Make example magic widget
+    - id: napari-dextrusion.make_func_widget
+      python_name: napari_dextrusion._widget:example_function_widget
+      title: Make example function widget
+  readers:
+    - command: napari-dextrusion.get_reader
+      accepts_directories: false
+      filename_patterns: ['*.npy']
+  writers:
+    - command: napari-dextrusion.write_multiple
+      layer_types: ['image*','labels*']
+      filename_extensions: []
+    - command: napari-dextrusion.write_single_image
+      layer_types: ['image']
+      filename_extensions: ['.npy']
+  sample_data:
+    - command: napari-dextrusion.make_sample_data
+      display_name: Dextrusion napari plugin
+      key: unique_id.1
+  widgets:
+    - command: napari-dextrusion.make_qwidget
+      display_name: Example QWidget
+    - command: napari-dextrusion.make_magic_widget
+      display_name: Example Magic Widget
+    - command: napari-dextrusion.make_func_widget
+      autogenerate: true
+      display_name: Example Function Widget
