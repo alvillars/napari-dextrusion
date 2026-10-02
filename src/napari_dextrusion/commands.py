@@ -61,6 +61,7 @@ class TrainParams:
     naug: int = 3
     add_nothing: int = 10
     val_ratio: float = 0.2
+    batch_size: int = 30
     freeze_cnn: bool = False
     oversample: dict[str, int] = field(default_factory=dict)
     seed: int = 0
@@ -70,7 +71,8 @@ class TrainParams:
 
 def train_args(p: TrainParams) -> list[str]:
     a: list = ["train", p.data, "-o", p.out, "--epochs", p.epochs, "--lr", p.lr, "--naug", p.naug,
-               "--add-nothing", p.add_nothing, "--val-ratio", p.val_ratio, "--seed", p.seed,
+               "--add-nothing", p.add_nothing, "--val-ratio", p.val_ratio, "--batch-size", p.batch_size,
+         "--seed", p.seed,
                "--workers", p.workers]
     if p.init_from:
         a += ["--init-from", p.init_from]

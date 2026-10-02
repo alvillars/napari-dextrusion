@@ -1,0 +1,17 @@
+name: napari-dextrusion
+display_name: DeXtrusion
+contributions:
+  commands:
+    - id: napari-dextrusion.get_reader
+      python_name: napari_dextrusion.reader:napari_get_reader
+      title: Open a 2D+t movie
+    - id: napari-dextrusion.make_widget
+      python_name: napari_dextrusion.widget:DextrusionWidget
+      title: DeXtrusion
+  readers:
+    - command: napari-dextrusion.get_reader
+      accepts_directories: false
+      filename_patterns: ['*.tif', '*.tiff']
+  widgets:
+    - command: napari-dextrusion.make_widget
+      display_name: DeXtrusion
