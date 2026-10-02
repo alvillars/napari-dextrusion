@@ -1,3 +1,4 @@
+import os
 import sys
 
 import numpy as np
@@ -17,7 +18,12 @@ from napari_dextrusion.review import NOTHING_SUFFIX
 from napari_dextrusion.session import Session, write_detect_meta
 from napari_dextrusion.tab_inference import InferenceTab
 from napari_dextrusion.tab_review import CROP_LAYER, EXCLUDE_KEY, NOTHING_KEY, ReviewTab
-from napari_dextrusion.tab_train import TrainTab, build_catnames, link_extra_data
+from napari_dextrusion.tab_train import (
+    TrainTab,
+    build_catnames,
+    link_extra_data,
+    linked_project_files,
+)
 from napari_dextrusion.widget import DextrusionWidget
 
 DEATH, DIV = "_cell_death.zip", "_cell_division.zip"
@@ -268,3 +274,32 @@ def test_review_loads_roi_files_of_an_earlier_run(qapp, movie_file, tmp_path, no
     tab.add_folder(far)
     tab.load_detections()
     assert any("outside the open movie" in m for m in no_dialogs)
+
+
+def test_extra_data_never_links_the_project_movie(tmp_path):
+    """Writing the rescaled movie through a link would overwrite the other dataset's copy."""
+    other = tmp_path / "finetune_set"
+    other.mkdir()
+    for n in ("001.tif", "001_cell_death.zip", "mov.tif", "mov_cell_division.zip", "mov2.tif"):
+        (other / n).write_bytes(b"x")
+    dest = tmp_path / "prepared"
+    assert link_extra_data(other, dest, "mov") == 3
+    assert sorted(p.name for p in dest.iterdir()) == ["001.tif", "001_cell_death.zip", "mov2.tif"]
+    assert linked_project_files(dest, "mov") == []
+    os.symlink(other / "mov.tif", dest / "mov.tif")  # a leftover from an older version
+    assert [p.name for p in linked_project_files(dest, "mov")] == ["mov.tif"]
+
+
+def test_train_refuses_when_prepared_holds_links_to_the_project_movie(
+        qapp, movie_file, tiny_model, no_dialogs):
+    s = Session()
+    s.open_movie(movie_file)
+    victim = movie_file.parent / "elsewhere.tif"
+    victim.write_bytes(b"precious")
+    s.prepared_dir.mkdir()
+    os.symlink(victim, s.prepared_dir / "mov.tif")
+    tab = TrainTab(ViewerModel(), s)
+    tab.set_init(tiny_model)
+    tab.start()
+    assert not tab.runner.running and any("write through" in m for m in no_dialogs)
+    assert victim.read_bytes() == b"precious"

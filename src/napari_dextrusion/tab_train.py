@@ -29,21 +29,37 @@ from .ui import LogView, PathRow, float_spin, int_spin
 log = logging.getLogger("napari_dextrusion")
 
 
-def link_extra_data(extra: Path, dest: Path) -> int:
+def belongs_to_movie(name: str, stem: str) -> bool:
+    """Is ``name`` the movie called ``stem`` or one of its ROI files (``<stem>_*.zip``)?"""
+    return name == f"{stem}.tif" or name.startswith(f"{stem}_")
+
+
+def link_extra_data(extra: Path, dest: Path, skip_stem: str | None = None) -> int:
     """Symlink every ``.tif`` / ``.zip`` of ``extra`` into ``dest`` (existing names are kept).
 
     Used to train on the movie of the project together with another dataset (for instance the
-    original one) without copying data. Returns the number of links made.
+    original one) without copying data. Files of the project's own movie (``skip_stem``) are never
+    linked: ``prepare`` writes them into ``dest``, and writing through a link would overwrite the
+    other dataset's copy. Returns the number of links made.
     """
     dest.mkdir(parents=True, exist_ok=True)
     n = 0
     for f in sorted(extra.iterdir()):
+        if skip_stem and belongs_to_movie(f.name, skip_stem):
+            continue
         if f.suffix in (".tif", ".zip") and f.is_file() and not f.name.endswith(".bak.zip"):
             link = dest / f.name
             if not (link.exists() or link.is_symlink()):
                 os.symlink(f.resolve(), link)
                 n += 1
     return n
+
+
+def linked_project_files(dest: Path, stem: str) -> list[Path]:
+    """Symlinks in ``dest`` that ``prepare`` would write through (files of the project movie)."""
+    if not dest.is_dir():
+        return []
+    return sorted(p for p in dest.iterdir() if p.is_symlink() and belongs_to_movie(p.name, stem))
 
 
 def build_catnames(base: list[str] | None, typed: str) -> list[str]:
@@ -138,11 +154,18 @@ class TrainTab(QWidget):
             QMessageBox.warning(self, "Train", str(e))
             return
         data = s.prepared_dir
+        stale = linked_project_files(data, s.stem)
+        if stale:
+            QMessageBox.warning(
+                self, "Train", f"{data} holds links named like the project movie "
+                f"({stale[0].name}...): rescaling would write through them into another folder. "
+                "Remove those links (they are not your data) and start again.")
+            return
         cmds = [dextrusion_argv(*prepare_args(s.movie_path, data, s.project, s.cell_diameter,
                                               s.extrusion_duration))]
         extra = self.extra.path()
         if extra is not None:
-            n = link_extra_data(extra, data)
+            n = link_extra_data(extra, data, s.stem)
             self.log.add(f"linked {n} file(s) of {extra} into {data}")
         dev = self.device.currentText()
         p = TrainParams(
