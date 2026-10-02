@@ -67,7 +67,8 @@ Review
     network's scale, mapped back to your movie), looping. Verdict keys: ``q w g h j`` one class each
     (in the order of the buttons), ``n`` not an event, ``u`` exclude. Verdicts are written at once:
     a class goes to that class's file, *not an event* to ``movie_nothing.zip``, *exclude* nowhere.
-    Changing a verdict moves the point; points you annotated by hand are never removed. *Retrain*
+    *Stop review* leaves at any time (the loop also pauses when you open another tab); *Start / resume*
+    continues where you stopped. Changing a verdict moves the point; points you annotated by hand are never removed. *Retrain*
     jumps to the Train tab.
 
 Development

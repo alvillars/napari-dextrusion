@@ -86,6 +86,11 @@ class ReviewTab(QWidget):
         self.loop.toggled.connect(self._loop_toggled)
         self.speed = float_spin(8, 1, 30, 1, 0, "frames per second")
         self.speed.valueChanged.connect(lambda _: self._loop_toggled(self.loop.isChecked()))
+        self.stop_btn = QPushButton("Stop review")
+        self.stop_btn.setToolTip("leave the review; verdicts are already saved, resume it later "
+                                 "with Start / resume")
+        self.stop_btn.clicked.connect(self.stop)
+        self.stop_btn.setEnabled(False)
         self.retrain_btn = QPushButton("Retrain with these annotations →")
         self.retrain_btn.clicked.connect(lambda: self.goto_train and self.goto_train())
 
@@ -112,6 +117,7 @@ class ReviewTab(QWidget):
         sp = QFormLayout()
         sp.addRow("speed (fps)", self.speed)
         lay.addLayout(sp)
+        lay.addWidget(self.stop_btn)
         lay.addWidget(self.retrain_btn)
         lay.addStretch(1)
         self.verdict_box.setEnabled(False)
@@ -213,6 +219,7 @@ class ReviewTab(QWidget):
                              on_applied=lambda: s.reload_annotations and s.reload_annotations())
         self._build_verdict_buttons(rlog.meta["classes"])
         self.verdict_box.setEnabled(bool(len(rlog)))
+        self.stop_btn.setEnabled(True)
         flat = s.movie[:: max(1, len(s.movie) // 10)]
         self.limits = tuple(float(v) for v in np.percentile(flat, (1, 99.8)))
         self.show()
@@ -312,6 +319,39 @@ class ReviewTab(QWidget):
             f"{run.progress()}\nevent {e['t']}, y {e['y']}, x {e['x']}\n"
             f"predicted: {mine} (score {'n/a' if e['proba'] is None else format(e['proba'], '.0f')})\nyour verdict: {shown}"
             + ("\nAll events reviewed." if run.finished else ""))
+
+    def stop(self) -> None:
+        """Leave the review: stop the loop, remove the crop layers, show the movie again.
+
+        Nothing is lost: every verdict is already saved in the log and the training files, and
+        *Start / resume review* continues where it stopped.
+        """
+        self.timer.stop()
+        done = None
+        if self.run is not None:
+            done = (sum(e["verdict"] is not None for e in self.run.log.entries), self.run.n)
+        self.run = None
+        for layer in (self.crop_layer, self.mark_layer):
+            if layer is not None and layer in self.viewer.layers:
+                self.viewer.layers.remove(layer)
+        self.crop_layer = self.mark_layer = None
+        if "movie" in self.viewer.layers:
+            self.viewer.layers["movie"].visible = True
+            self.viewer.layers.selection.active = self.viewer.layers["movie"]
+        self.verdict_box.setEnabled(False)
+        self.stop_btn.setEnabled(False)
+        if done is not None:
+            self.info.setText(f"Review stopped: {done[0]} of {done[1]} reviewed. "
+                              "Start / resume review continues it.")
+
+    def hideEvent(self, event) -> None:  # another tab was opened: stop moving the slider
+        self.timer.stop()
+        super().hideEvent(event)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self.run is not None:
+            self._loop_toggled(self.loop.isChecked())
 
     def _loop_toggled(self, on: bool) -> None:
         if on and self.run is not None:

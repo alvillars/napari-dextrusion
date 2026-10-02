@@ -303,3 +303,41 @@ def test_train_refuses_when_prepared_holds_links_to_the_project_movie(
     tab.start()
     assert not tab.runner.running and any("write through" in m for m in no_dialogs)
     assert victim.read_bytes() == b"precious"
+
+
+def test_stop_review_ends_the_loop_and_restores_the_viewer(qapp, movie_file, tiny_model):
+    from qtpy.QtGui import QHideEvent, QShowEvent
+
+    viewer = ViewerModel()
+    s = Session()
+    s.open_movie(movie_file)
+    viewer.add_image(s.movie, name="movie")
+    make_detection(s, tiny_model)
+    tab = ReviewTab(viewer, s)
+    tab.load_detections()
+    for w in tab.percent.values():
+        w.setValue(100)
+    assert not tab.stop_btn.isEnabled()
+    tab.start()
+    assert tab.timer.isActive() and tab.stop_btn.isEnabled()
+    assert not viewer.layers["movie"].visible
+    # leaving the tab pauses the slider, coming back resumes it
+    tab.hideEvent(QHideEvent())
+    assert not tab.timer.isActive()
+    tab.showEvent(QShowEvent())
+    assert tab.timer.isActive()
+    tab._verdict(DIV)  # one of four events reviewed, then stop half way
+    tab.stop()
+    assert not tab.timer.isActive() and tab.run is None
+    assert [layer.name for layer in viewer.layers] == ["movie"] and viewer.layers["movie"].visible
+    assert "1 of 4 reviewed" in tab.info.text()
+    assert not tab.verdict_box.isEnabled() and not tab.stop_btn.isEnabled()
+    tab.showEvent(QShowEvent())  # no review running: the loop must not restart
+    assert not tab.timer.isActive()
+    tab._verdict(DIV)  # a stray key press after stopping does nothing
+    assert len(read_rois(s.project / f"mov{DIV}")) == 1
+    # the saved log resumes at the first event that is still pending
+    tab._ask_resume = lambda path: "resume"
+    tab.start()
+    assert tab.run.index == 1 and tab.timer.isActive()
+    tab.stop()
