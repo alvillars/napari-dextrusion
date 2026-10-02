@@ -1,58 +1,50 @@
 [build-system]
-requires = ["setuptools>=42.0.0", "wheel", "setuptools_scm"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
+[project]
+name = "napari-dextrusion"
+version = "0.1.0"
+description = "napari plugin for DeXtrusion: detect, annotate, review and retrain cellular event detection on 2D+t movies."
+readme = "README.rst"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "alvillars" }]
+classifiers = [
+    "Framework :: napari",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "dextrusion",
+    "napari>=0.5",
+    "numpy>=1.26",
+    "qtpy",
+]
 
-[tool.setuptools_scm]
-write_to = "src/napari_dextrusion/_version.py"
+[project.optional-dependencies]
+# napari with a Qt backend, for running the plugin standalone (`uv run napari`)
+gui = ["napari[all]>=0.5"]
 
-[tool.black]
-line-length = 79
-target-version = ['py38', 'py39', 'py310']
+[project.entry-points."napari.manifest"]
+napari-dextrusion = "napari_dextrusion:napari.yaml"
 
+[tool.uv.sources]
+dextrusion = { git = "https://github.com/alvillars/dextrusion-torch", branch = "main" }
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/napari_dextrusion"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.ruff]
-line-length = 79
-select = [
-    "E", "F", "W", #flake8
-    "UP", # pyupgrade
-    "I", # isort
-    "BLE", # flake8-blind-exception
-    "B", # flake8-bugbear
-    "A", # flake8-builtins
-    "C4", # flake8-comprehensions
-    "ISC", # flake8-implicit-str-concat
-    "G", # flake8-logging-format
-    "PIE", # flake8-pie
-    "SIM", # flake8-simplify
-]
-ignore = [
-    "E501", # line too long. let black handle this
-    "UP006", "UP007", # type annotation. As using magicgui require runtime type annotation then we disable this.
-    "SIM117", # flake8-simplify - some of merged with statements are not looking great with black, reanble after drop python 3.9
-]
+line-length = 100
+src = ["src", "tests"]
 
-exclude = [
-    ".bzr",
-    ".direnv",
-    ".eggs",
-    ".git",
-    ".mypy_cache",
-    ".pants.d",
-    ".ruff_cache",
-    ".svn",
-    ".tox",
-    ".venv",
-    "__pypackages__",
-    "_build",
-    "buck-out",
-    "build",
-    "dist",
-    "node_modules",
-    "venv",
-    "*vendored*",
-    "*_vendor*",
-]
-
-target-version = "py38"
-fix = true
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
