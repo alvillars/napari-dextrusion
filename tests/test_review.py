@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import tifffile
 from dextrusion.config import DeXConfig
 from dextrusion.io import read_rois
@@ -161,3 +162,53 @@ def test_empty_queue(tmp_path):
     log = make_log(tmp_path, [])
     assert log.first_pending() is None and log.counts() == {}
     assert apply_verdicts(log, tmp_path, "m", SHAPE) == {}
+
+
+# ------------------------------------------------------------ detections made outside the plugin
+def write_zip(folder, name, pts):
+    from dextrusion.io import create_roi, write_rois
+
+    write_rois(folder / name, [create_roi(p, 1) for p in pts], verbose=False)
+
+
+def test_find_suffixes_ignores_backups_nothing_and_other_movies(tmp_path):
+    from napari_dextrusion.review import find_detection_suffixes
+
+    for n in ("m_cell_death.zip", "m_cell_division.zip", "m_cell_death.bak.zip", "m_nothing.zip",
+              "other_cell_death.zip", "m_cell_death_rawproba.tif"):
+        (tmp_path / n).write_bytes(b"x")
+    assert find_detection_suffixes(tmp_path, "m") == ["_cell_death.zip", "_cell_division.zip"]
+
+
+def test_collect_from_rois_without_and_with_maps(tmp_path):
+    from napari_dextrusion.review import collect_from_rois
+
+    write_zip(tmp_path, "m_cell_death.zip", [(5, 30, 40), (20, 60, 70)])
+    out = collect_from_rois(tmp_path, "m", [DEATH, DIV], SHAPE)  # no division file: skipped
+    assert list(out) == [1] and [(c.t, c.y, c.x) for c in out[1]] == [(5, 30, 40), (20, 60, 70)]
+    assert all(np.isnan(c.proba) for c in out[1])
+    pm = np.zeros((20, 60, 70), np.uint8)  # map at half the movie's size in every axis
+    pm[2:4, 14:17, 18:22] = 200
+    tifffile.imwrite(tmp_path / "m_cell_death_rawproba.tif", pm)
+    scored = collect_from_rois(tmp_path, "m", [DEATH], SHAPE)[1]
+    assert scored[0].proba == 200 and scored[1].proba == 0
+
+
+def test_collect_from_rois_rejects_another_movie(tmp_path):
+    from napari_dextrusion.review import collect_from_rois
+
+    write_zip(tmp_path, "m_cell_death.zip", [(5, 30, 40), (5, 500, 40)])
+    with pytest.raises(ValueError, match="outside the open movie"):
+        collect_from_rois(tmp_path, "m", [DEATH], SHAPE)
+
+
+def test_external_config_and_unscored_log(tmp_path):
+    from napari_dextrusion.review import external_config
+
+    cfg = external_config(None, [DEATH, DIV], None)
+    assert cfg.catnames == ["", DEATH, DIV] and cfg.window_shape == (10, 45, 45)
+    base = DeXConfig()
+    merged = external_config("net", ["_cell_delamination.zip", DIV], lambda p: base)
+    assert merged.catnames == base.catnames + ["_cell_delamination.zip"] and merged.ncat == 5
+    ReviewLog.new(tmp_path / "r.json", [Candidate(1, 1, 2, 3, float("nan"))], cfg.catnames)
+    assert ReviewLog.load(tmp_path / "r.json").entries[0]["proba"] is None  # valid JSON, no NaN

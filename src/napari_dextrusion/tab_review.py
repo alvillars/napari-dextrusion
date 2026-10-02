@@ -11,6 +11,7 @@ from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QLabel,
@@ -26,12 +27,15 @@ from .review import (
     ReviewLog,
     class_label,
     collect_candidates,
+    collect_from_rois,
     crop_spec,
+    external_config,
+    find_detection_suffixes,
     sample_candidates,
 )
 from .review_run import ReviewRun
 from .session import Session, model_config, read_detect_meta
-from .ui import float_spin, int_spin
+from .ui import PathRow, float_spin, int_spin
 
 log = logging.getLogger("napari_dextrusion")
 NOTHING_KEY, EXCLUDE_KEY = "n", "u"
@@ -54,6 +58,13 @@ class ReviewTab(QWidget):
         self._frame = 0
 
         self.runs = QComboBox()
+        self.browse_btn = QPushButton("Other detection folder…")
+        self.browse_btn.setToolTip("a folder with <movie>_cell_*.zip ROI files (and, optionally, "
+                                   "the *_rawproba.tif maps) from an earlier run")
+        self.browse_btn.clicked.connect(self.browse_folder)
+        self.models_row = PathRow(caption="DeXNet used for the detections (window size, classes)")
+        self.models_row.setToolTip("only for detections made outside the plugin; empty = standard "
+                                   "window (10 frames, 45 px, 25 px cells, 4.5 frames)")
         self.load_btn = QPushButton("Load detections")
         self.load_btn.clicked.connect(self.load_detections)
         self.percent_form = QFormLayout()
@@ -81,7 +92,9 @@ class ReviewTab(QWidget):
         lay = QVBoxLayout(self)
         top = QFormLayout()
         top.addRow("detections", self.runs)
+        top.addRow("model (other folders)", self.models_row)
         lay.addLayout(top)
+        lay.addWidget(self.browse_btn)
         lay.addWidget(self.load_btn)
         lay.addWidget(QLabel("% of the events of each class to review"))
         lay.addLayout(self.percent_form)
@@ -107,31 +120,58 @@ class ReviewTab(QWidget):
 
     # ----------------------------------------------------------------------- detections
     def refresh_runs(self) -> None:
-        names = [p.name for p in self.session.detect_runs()]
-        current = self.runs.currentText()
+        current = self.runs.currentData()
+        extra = [(self.runs.itemText(i), self.runs.itemData(i)) for i in range(self.runs.count())
+                 if not self._in_project(Path(self.runs.itemData(i)))]
         self.runs.clear()
-        self.runs.addItems(names)
-        if current in names:
-            self.runs.setCurrentText(current)
-        elif names:
-            self.runs.setCurrentIndex(len(names) - 1)
+        for p in self.session.detect_runs():
+            self.runs.addItem(p.name, str(p))
+        for name, path in extra:  # folders added with "Other detection folder…" stay listed
+            self.runs.addItem(name, path)
+        index = self.runs.findData(current)
+        self.runs.setCurrentIndex(index if index >= 0 else self.runs.count() - 1)
+
+    def _in_project(self, folder: Path) -> bool:
+        return self.session.project is not None and folder.parent == self.session.project / "detect"
+
+    def browse_folder(self) -> None:
+        start = str(self.session.movie_path.parent) if self.session.movie_path else ""
+        path = QFileDialog.getExistingDirectory(self, "Folder with detections", start)
+        if path:
+            self.add_folder(Path(path))
+
+    def add_folder(self, folder: Path) -> None:
+        """List a detection folder made outside the plugin and select it."""
+        folder = Path(folder)
+        index = self.runs.findData(str(folder))
+        if index < 0:
+            self.runs.addItem(f"{folder.parent.name}/{folder.name}", str(folder))
+            index = self.runs.count() - 1
+        self.runs.setCurrentIndex(index)
 
     def load_detections(self) -> None:
         s = self.session
         try:
             s.require_movie()
-            name = self.runs.currentText()
-            if not name:
-                raise RuntimeError("no detection yet: run the Detect tab first")
-            folder = s.detect_dir(name)
+            data = self.runs.currentData()
+            if not data:
+                raise RuntimeError("no detection yet: run the Detect tab, or load a folder with "
+                                   "'Other detection folder…'")
+            folder = Path(data)
             meta = read_detect_meta(folder)
-            if meta is None:
-                raise RuntimeError(f"{folder} was not made by this plugin (no plugin_detect.json): "
-                                   "detect from the Detect tab so that the settings are recorded")
-            cfg = model_config(meta["models"])
-            cands = collect_candidates(
-                folder, s.stem, cfg, s.movie.shape, meta["volume_threshold"],
-                meta["proba_threshold"], meta["disxy"], meta["distime"])
+            if meta is not None:  # made by the Detect tab: settings were recorded
+                name = folder.name
+                cfg = model_config(meta["models"])
+                cands = collect_candidates(
+                    folder, s.stem, cfg, s.movie.shape, meta["volume_threshold"],
+                    meta["proba_threshold"], meta["disxy"], meta["distime"])
+            else:  # an earlier run: read the ROI files, scores from the maps if present
+                name = folder.name if self._in_project(folder) else f"{folder.parent.name}-{folder.name}"
+                suffixes = find_detection_suffixes(folder, s.stem)
+                if not suffixes:
+                    raise RuntimeError(f"no {s.stem}_*.zip ROI file in {folder}")
+                cfg = external_config(self.models_row.path(), suffixes, model_config)
+                cands = collect_from_rois(folder, s.stem, cfg.catnames[1:], s.movie.shape)
         except Exception as e:  # noqa: BLE001 - shown to the user
             QMessageBox.warning(self, "Review", str(e))
             return
@@ -270,7 +310,7 @@ class ReviewTab(QWidget):
             "not an event" if given == NOTHING_SUFFIX else class_label(given))
         self.info.setText(
             f"{run.progress()}\nevent {e['t']}, y {e['y']}, x {e['x']}\n"
-            f"predicted: {mine} (score {e['proba']:.0f})\nyour verdict: {shown}"
+            f"predicted: {mine} (score {'n/a' if e['proba'] is None else format(e['proba'], '.0f')})\nyour verdict: {shown}"
             + ("\nAll events reviewed." if run.finished else ""))
 
     def _loop_toggled(self, on: bool) -> None:

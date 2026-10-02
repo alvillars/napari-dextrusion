@@ -17,13 +17,13 @@ from __future__ import annotations
 import json
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 from dextrusion.config import DeXConfig
 from dextrusion.inference import scale_factors
-from dextrusion.io import read_movie
+from dextrusion.io import read_movie, read_rois
 from dextrusion.label import clean_points, load_points, roi_path, save_points
 from dextrusion.postprocess import get_events
 
@@ -80,6 +80,61 @@ def collect_candidates(folder: str | Path, movie_stem: str, config: DeXConfig, i
                             disxy, distime)
         out[cat] = [Candidate(cat, int(e.t), int(e.y), int(e.x), float(e.proba)) for e in events]
     return out
+
+
+def find_detection_suffixes(folder: str | Path, movie_stem: str) -> list[str]:
+    """Class suffixes (``'_cell_division.zip'``) of the ROI files ``<movie><suffix>`` of a folder,
+    without backups and without the hand-picked non-events."""
+    folder = Path(folder)
+    found = {p.name[len(movie_stem):] for p in folder.glob(f"{movie_stem}_*.zip")
+             if not p.name.endswith(".bak.zip")}
+    return sorted(found - {NOTHING_SUFFIX})
+
+
+def map_score(pm: np.ndarray, init_shape, t: int, y: int, x: int) -> float:
+    """Peak of a probability map (0-255, at the rescaled size) around a position of the movie."""
+    mt, my, mx = (round(c * m / n) for c, m, n in zip((t, y, x), pm.shape, init_shape))
+    window = pm[max(0, mt - 1): mt + 2, max(0, my - 3): my + 4, max(0, mx - 3): mx + 4]
+    return float(window.max()) if window.size else float("nan")
+
+
+def collect_from_rois(folder: str | Path, movie_stem: str, suffixes: list[str],
+                      init_shape) -> dict[int, list[Candidate]]:
+    """Events of a detection folder read from its ROI files, for runs made outside the plugin.
+
+    Class ``i + 1`` is ``suffixes[i]``. The score is the peak of the matching ``*_rawproba.tif``
+    map next to the ROI file (a different quantity from the mean event probability of
+    :func:`collect_candidates`), or NaN when there is no map. Positions outside the movie mean the
+    detections belong to another movie and raise ``ValueError``.
+    """
+    folder = Path(folder)
+    out: dict[int, list[Candidate]] = {}
+    for cat, suffix in enumerate(suffixes, start=1):
+        zip_path = roi_path(folder, movie_stem, suffix)
+        if not zip_path.exists():
+            continue
+        points = read_rois(zip_path)
+        bad = [p for p in points if not all(0 <= c < n for c, n in zip(p, init_shape))]
+        if bad:
+            raise ValueError(f"{zip_path.name}: {len(bad)} event(s) lie outside the open movie "
+                             f"{tuple(init_shape)} (first: {bad[0]}); are these detections of "
+                             "another movie?")
+        mp = proba_map_path(folder, movie_stem, suffix)
+        pm = read_movie(mp) if mp.exists() else None
+        out[cat] = [Candidate(cat, int(t), int(y), int(x),
+                              map_score(pm, init_shape, t, y, x) if pm is not None else float("nan"))
+                    for t, y, x in points]
+    return out
+
+
+def external_config(model_dir: str | Path | None, suffixes: list[str], model_config) -> DeXConfig:
+    """Window geometry and classes for detections made outside the plugin: the network's if a
+    model folder is given (``model_config`` reads it), else the standard window; the classes of
+    the model first, then any class found in the folder that it does not have."""
+    cfg = model_config(model_dir) if model_dir else DeXConfig(catnames=[""], ncat=1)
+    names = list(cfg.catnames)
+    names += [s for s in suffixes if s not in names]
+    return replace(cfg, catnames=names, ncat=len(names))
 
 
 def sample_candidates(candidates: dict[int, list[Candidate]], percent: dict[int, float],
@@ -158,7 +213,7 @@ class ReviewLog:
     @classmethod
     def new(cls, path: str | Path, queue: list[Candidate], catnames: list[str], **meta) -> ReviewLog:
         entries = [{"cat": c.cat, "class": catnames[c.cat], "t": c.t, "y": c.y, "x": c.x,
-                    "proba": round(c.proba, 2), "verdict": None, "applied": None} for c in queue]
+                    "proba": None if math.isnan(c.proba) else round(c.proba, 2), "verdict": None, "applied": None} for c in queue]
         log = cls(path, entries, {"version": LOG_VERSION, **meta})
         log.save()
         return log

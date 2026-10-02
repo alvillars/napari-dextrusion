@@ -59,7 +59,10 @@ Train
     Hand-picked non-events are used only when *non-event copies* is above 1.
 
 Review
-    Loads the detections of a Detect run, draws a random percentage of the events of each class and
+    Loads the detections of a Detect run (listed in the drop-down) or of any earlier run: *Other
+    detection folder...* takes a folder with ``<movie>_cell_*.zip`` ROI files. Maps
+    (``*_rawproba.tif``) are optional and only give a score; pick the DeXNet used in *model* so the
+    crop has its window size (empty: standard window). Then it draws a random percentage of the events of each class and
     shows them one at a time as the exact window the network sees (10 frames, 45 x 45 px at the
     network's scale, mapped back to your movie), looping. Verdict keys: ``q w g h j`` one class each
     (in the order of the buttons), ``n`` not an event, ``u`` exclude. Verdicts are written at once:

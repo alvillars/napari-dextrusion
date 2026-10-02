@@ -227,3 +227,44 @@ def test_detect_then_train_through_the_real_cli(qapp, movie_file, tiny_model):
     cfg = DeXConfig.from_json(run / "config.json")
     assert cfg.catnames[-1] == "_cell_delamination.zip" and cfg.ncat == 5
     assert (s.prepared_dir / "mov_nothing.zip").exists()  # hard negatives were carried over
+
+
+def test_review_loads_roi_files_of_an_earlier_run(qapp, movie_file, tmp_path, no_dialogs):
+    """Detections made outside the plugin: only the ROI zips (no plugin_detect.json, no maps)."""
+    from dextrusion.io import create_roi, write_rois
+
+    old = tmp_path / "earlier_run" / "ft"
+    old.mkdir(parents=True)
+    write_rois(old / f"mov{DEATH}", [create_roi(p, 1) for p in EVENTS[:2]], verbose=False)
+    write_rois(old / "mov_cell_delamination.zip", [create_roi(p, 1) for p in EVENTS[2:]],
+               verbose=False)
+    write_rois(old / f"mov{DEATH[:-4]}.bak.zip", [create_roi((1, 1, 1), 1)], verbose=False)
+    viewer = ViewerModel()
+    s = Session()
+    s.open_movie(movie_file)
+    tab = ReviewTab(viewer, s)
+    assert tab.runs.count() == 0  # nothing from the plugin yet
+    tab.add_folder(old)
+    assert tab.runs.currentText() == "earlier_run/ft"
+    tab.load_detections()
+    assert not no_dialogs and sorted(tab.percent) == [1, 2]
+    for w in tab.percent.values():
+        w.setValue(100)
+    tab.start()
+    run = tab.run
+    assert run.n == 4 and run.log.entries[0]["proba"] is None
+    assert run.log.meta["classes"] == [DEATH, "_cell_delamination.zip"]
+    assert "n/a" in tab.info.text()
+    assert s.review_log_path("earlier_run-ft").exists()
+    tab._verdict("_cell_delamination.zip")
+    assert read_rois(s.project / "mov_cell_delamination.zip")
+    # the folder stays listed after the project's runs are refreshed
+    tab.refresh_runs()
+    assert tab.runs.count() == 1
+    # detections of another movie are refused with a message, not a crash
+    far = tmp_path / "far"
+    far.mkdir()
+    write_rois(far / f"mov{DEATH}", [create_roi((5, 900, 900), 1)], verbose=False)
+    tab.add_folder(far)
+    tab.load_detections()
+    assert any("outside the open movie" in m for m in no_dialogs)
