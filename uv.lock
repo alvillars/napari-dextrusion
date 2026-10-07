@@ -745,7 +745,7 @@ wheels = [
 [[package]]
 name = "dextrusion"
 version = "1.0.0"
-source = { git = "https://github.com/alvillars/dextrusion-torch?branch=main#8db57b0d28a873912ba94e1042ec0633ec0957c6" }
+source = { git = "https://github.com/alvillars/dextrusion-torch?branch=main#688efbddcbd7d564b63c9b0ce47050615aa3ccf2" }
 dependencies = [
     { name = "monai" },
     { name = "numpy" },
